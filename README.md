@@ -75,11 +75,12 @@ cargo run -p desklink-linux --release
 4. Windows 端输入 `remote`，再输入 `move 20 0` 验证鼠标移动。
 5. 测试结束输入 `local` 或 `release`。
 
-Linux Client 连续 5 秒收不到主机数据时，会自动回到本地状态并释放按键。
+远程模式下终端键盘也会被转发；如果无法输入 `local`，使用 Windows 全局紧急快捷键 `Ctrl+Alt+Esc`，程序会停止远程捕获、发送 `ReleaseAll` 并恢复本地输入。
+
+Linux Client 连续 5 秒收不到主机数据时，会自动回到本地状态并释放按键。Windows 处于 `remote` 状态时会通过心跳重复同步状态，因此 Windows 和 Linux 可以任意顺序启动；只要 Windows 进程仍在运行，Linux 后启动后即可接管状态。
 
 ## 5. 防火墙
 
 Ubuntu：`sudo ufw allow 24801/udp`。Windows 弹出网络访问提示时，请允许 DeskLink 访问专用网络。
 
-当前版本已实现协议、UDP、序列号去重、状态切换、uinput、心跳和断线恢复；Windows 原生 Raw Input/低级 Hook 与图形化配置界面属于后续阶段，当前 Windows 端使用终端命令验证输入链路。
-
+当前版本已实现协议、UDP、序列号去重、状态切换、uinput、心跳和断线恢复，并接入 Windows 全局低级鼠标/键盘 Hook。输入 `remote` 后，真实鼠标点击、移动、滚轮和键盘事件会被转发到 Linux；输入 `local` 或 `release` 后恢复 Windows 本地输入。终端 `move/click/key` 命令仍保留用于调试。图形化配置界面和 Raw Input 高精度相对位移仍属于后续阶段。
