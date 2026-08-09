@@ -77,7 +77,29 @@ cargo run -p desklink-linux --release
 
 远程模式下终端键盘也会被转发；如果无法输入 `local`，使用 Windows 全局紧急快捷键 `Ctrl+Alt+Esc`，程序会停止远程捕获、发送 `ReleaseAll` 并恢复本地输入。
 
-Linux Client 连续 5 秒收不到主机数据时，会自动回到本地状态并释放按键。Windows 处于 `remote` 状态时会通过心跳重复同步状态，因此 Windows 和 Linux 可以任意顺序启动；只要 Windows 进程仍在运行，Linux 后启动后即可接管状态。
+Linux Client 超过配置的断线时间（默认 6 秒）收不到主机数据时，会自动回到本地状态并释放按键。Windows 处于 `remote` 状态时会通过心跳重复同步状态，因此 Windows 和 Linux 可以任意顺序启动；只要 Windows 进程仍在运行，Linux 后启动后即可接管状态。
+
+## 配置文件
+
+复制示例配置，并在 Windows/Linux 两端使用相同的安全令牌：
+
+```text
+config.example.toml → desklink.toml
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item config.example.toml desklink.toml
+```
+
+Ubuntu：
+
+```bash
+cp config.example.toml desklink.toml
+```
+
+编辑 `desklink.toml`：Windows 主要使用 `network.target`，Linux 使用 `network.bind`。两端的 `security.token` 必须完全一致。环境变量 `DESKLINK_TARGET`、`DESKLINK_BIND`、`DESKLINK_TOKEN`、`DESKLINK_CONFIG` 会覆盖配置文件。
 
 ## 5. 防火墙
 

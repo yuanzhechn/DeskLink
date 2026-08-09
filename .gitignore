@@ -17,8 +17,10 @@ desktop.ini
 .env.*
 !.env.example
 
+# Contains the local peer address and shared secret.
+desklink.toml
+
 # Windows 调试/发布产物（通常位于 target/，这里作为额外保护）
 *.pdb
 *.ilk
 *.dSYM/
-
