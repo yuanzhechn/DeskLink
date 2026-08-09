@@ -5,7 +5,7 @@ use tokio::{io::{self, AsyncBufReadExt}, net::UdpSocket, time};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tracing::{info, warn};
 use std::sync::{atomic::{AtomicBool, Ordering}, OnceLock};
-use windows_sys::Win32::{Foundation::{LPARAM, LRESULT, WPARAM}, UI::{Input::KeyboardAndMouse::{KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT}, WindowsAndMessaging::*}};
+use windows_sys::Win32::{Foundation::{LPARAM, LRESULT, WPARAM}, UI::WindowsAndMessaging::*};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ControlState { Local, Remote, Disconnected }
@@ -35,7 +35,7 @@ fn windows_key_to_linux(vk: u32, scan_code: u32) -> u16 {
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == HC_ACTION && REMOTE_INPUT.load(Ordering::Acquire) {
+    if code == HC_ACTION as i32 && REMOTE_INPUT.load(Ordering::Acquire) {
         let data = &*(lparam as *const MSLLHOOKSTRUCT);
         let event = match wparam as u32 {
             WM_MOUSEMOVE => {
@@ -65,7 +65,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == HC_ACTION && REMOTE_INPUT.load(Ordering::Acquire) {
+    if code == HC_ACTION as i32 && REMOTE_INPUT.load(Ordering::Acquire) {
         let data = &*(lparam as *const KBDLLHOOKSTRUCT);
         let msg = wparam as u32;
         let pressed = matches!(msg, WM_KEYDOWN | WM_SYSKEYDOWN);
