@@ -11,7 +11,12 @@ impl Injector {
     fn new() -> Result<Self> {
         let mut keys = AttributeSet::<Key>::new();
         for code in 1..=255 { keys.insert(Key::new(code)); }
-        let device = VirtualDeviceBuilder::new()?.name("DeskLink Virtual Input").with_keys(&keys)?.with_relative_axes(&[RelativeAxisType::REL_X, RelativeAxisType::REL_Y, RelativeAxisType::REL_WHEEL, RelativeAxisType::REL_HWHEEL])?.build()?;
+        let mut axes = AttributeSet::<RelativeAxisType>::new();
+        axes.insert(RelativeAxisType::REL_X);
+        axes.insert(RelativeAxisType::REL_Y);
+        axes.insert(RelativeAxisType::REL_WHEEL);
+        axes.insert(RelativeAxisType::REL_HWHEEL);
+        let device = VirtualDeviceBuilder::new()?.name("DeskLink Virtual Input").with_keys(&keys)?.with_relative_axes(&axes)?.build()?;
         Ok(Self { device, pressed: HashSet::new() })
     }
     fn emit(&mut self, event: InputEvent) -> Result<()> {

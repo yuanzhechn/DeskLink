@@ -22,7 +22,7 @@ DeskLink/                    ← 编译工作区根目录
 打开 PowerShell，进入 **workspace 根目录**：
 
 ```powershell
-cd .\DeskLink.\
+cd .\DeskLink\
 cargo build -p desklink-windows --release
 ```
 
