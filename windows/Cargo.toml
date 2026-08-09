@@ -1,0 +1,13 @@
+[package]
+name = "desklink-windows"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+desklink-protocol = { path = "../protocol" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+

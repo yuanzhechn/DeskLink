@@ -1,0 +1,13 @@
+[general]
+emergency_hotkey = "Ctrl+Alt+Esc"
+edge_delay_ms = 80
+
+[network]
+control_port = 24800
+input_port = 24801
+
+[[devices]]
+id = "ubuntu-main"
+name = "Ubuntu PC"
+address = "192.168.1.20"
+
