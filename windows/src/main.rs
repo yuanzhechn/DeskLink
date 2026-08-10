@@ -3,7 +3,9 @@ mod web_ui;
 
 use anyhow::{Context, Result};
 use desklink_config::DeskLinkConfig;
-use desklink_protocol::{decode, encode, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION};
+use desklink_protocol::{
+    decode, encode, token_fingerprint, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION,
+};
 use layout::LayoutSnapshot;
 use std::{
     net::SocketAddr,
@@ -341,6 +343,7 @@ async fn main() -> Result<()> {
         .parse()
         .context("invalid DESKLINK_TARGET")?;
     let token = std::env::var("DESKLINK_TOKEN").unwrap_or_else(|_| config.security.token.clone());
+    let token_id = token_fingerprint(&token);
     let disconnect_timeout =
         Duration::from_millis(config.performance.disconnect_timeout_ms.max(1_000));
     let topology_enabled = config.topology.enabled;
@@ -394,7 +397,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    info!(?target, ?state, ui = %format!("http://{ui_bind}"), "DeskLink Windows Host started");
+    info!(?target, ?state, protocol = PROTOCOL_VERSION, config = %config_path, token_id = %token_id, ui = %format!("http://{ui_bind}"), "DeskLink Windows Host started");
     let mut lines = io::BufReader::new(io::stdin()).lines();
     let mut stdin_open = true;
     let mut heartbeat = time::interval(Duration::from_secs(2));

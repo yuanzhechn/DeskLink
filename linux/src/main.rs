@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use desklink_config::DeskLinkConfig;
-use desklink_protocol::{decode, encode, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION};
+use desklink_protocol::{
+    decode, encode, token_fingerprint, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION,
+};
 use evdev::{
     uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent as EvdevEvent, Key,
     RelativeAxisType,
@@ -219,6 +221,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| config.network.bind.clone())
         .parse()?;
     let token = std::env::var("DESKLINK_TOKEN").unwrap_or_else(|_| config.security.token.clone());
+    let token_id = token_fingerprint(&token);
     let disconnect_timeout =
         Duration::from_millis(config.performance.disconnect_timeout_ms.max(1_000));
     let socket = UdpSocket::bind(bind).await.context("bind input port")?;
@@ -230,7 +233,7 @@ async fn main() -> Result<()> {
     let mut authorized: Option<(SocketAddr, u64)> = None;
     let mut sequence: Option<u32> = None;
     let mut last_seen = Instant::now();
-    info!(?bind, "DeskLink Linux Client listening");
+    info!(?bind, protocol = PROTOCOL_VERSION, config = %config_path, token_id = %token_id, "DeskLink Linux Client listening");
     loop {
         let (n, peer) = match timeout(Duration::from_secs(1), socket.recv_from(&mut buf)).await {
             Ok(result) => result?,

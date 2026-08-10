@@ -4,6 +4,16 @@ pub const PROTOCOL_VERSION: u8 = 2;
 pub const DEFAULT_INPUT_PORT: u16 = 24801;
 pub const DEFAULT_CONTROL_PORT: u16 = 24800;
 
+pub fn token_fingerprint(token: &str) -> String {
+    let hash = token
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ *byte as u64).wrapping_mul(0x100000001b3)
+        });
+    format!("{hash:016x}")
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum InputEvent {
     MouseMove { dx: i16, dy: i16 },
@@ -104,5 +114,17 @@ mod tests {
             decode(&encode(&packet).unwrap()).unwrap(),
             Packet::Hello { session: 99, .. }
         ));
+    }
+
+    #[test]
+    fn token_fingerprint_is_stable() {
+        assert_eq!(
+            token_fingerprint("desklink-local"),
+            token_fingerprint("desklink-local")
+        );
+        assert_ne!(
+            token_fingerprint("desklink-local"),
+            token_fingerprint("different")
+        );
     }
 }
