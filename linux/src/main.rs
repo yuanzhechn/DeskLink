@@ -5,7 +5,7 @@ use desklink_protocol::{
 };
 use evdev::{
     uinput::VirtualDeviceBuilder, AbsInfo, AbsoluteAxisType, AttributeSet, EventType,
-    InputEvent as EvdevEvent, Key, RelativeAxisType, UinputAbsSetup,
+    InputEvent as EvdevEvent, Key, PropType, RelativeAxisType, UinputAbsSetup,
 };
 use std::{collections::HashSet, net::SocketAddr, time::Instant};
 use tokio::net::UdpSocket;
@@ -15,6 +15,7 @@ use tracing::{info, warn};
 struct Injector {
     keyboard: evdev::uinput::VirtualDevice,
     mouse: evdev::uinput::VirtualDevice,
+    absolute_pointer: evdev::uinput::VirtualDevice,
     pressed: HashSet<u16>,
     pressed_buttons: HashSet<u16>,
 }
@@ -99,6 +100,15 @@ impl RemoteCursor {
         self.y = next_y.clamp(0, self.height - 1);
         None
     }
+
+    fn snap_to_edge(&mut self, edge: ScreenEdge) {
+        match edge {
+            ScreenEdge::Left => self.x = 0,
+            ScreenEdge::Right => self.x = self.width - 1,
+            ScreenEdge::Top => self.y = 0,
+            ScreenEdge::Bottom => self.y = self.height - 1,
+        }
+    }
 }
 impl Injector {
     fn new() -> Result<Self> {
@@ -122,19 +132,31 @@ impl Injector {
         axes.insert(RelativeAxisType::REL_Y);
         axes.insert(RelativeAxisType::REL_WHEEL);
         axes.insert(RelativeAxisType::REL_HWHEEL);
-        let absolute_range = AbsInfo::new(0, 0, 65_535, 0, 0, 1);
-        let absolute_x = UinputAbsSetup::new(AbsoluteAxisType::ABS_X, absolute_range);
-        let absolute_y = UinputAbsSetup::new(AbsoluteAxisType::ABS_Y, absolute_range);
         let mouse = VirtualDeviceBuilder::new()?
             .name("DeskLink Virtual Mouse")
             .with_keys(&mouse_keys)?
             .with_relative_axes(&axes)?
+            .build()?;
+
+        let absolute_range = AbsInfo::new(0, 0, 65_535, 0, 0, 1);
+        let absolute_x = UinputAbsSetup::new(AbsoluteAxisType::ABS_X, absolute_range);
+        let absolute_y = UinputAbsSetup::new(AbsoluteAxisType::ABS_Y, absolute_range);
+        let mut absolute_keys = AttributeSet::<Key>::new();
+        absolute_keys.insert(Key::BTN_TOOL_MOUSE);
+        absolute_keys.insert(Key::BTN_LEFT);
+        let mut absolute_properties = AttributeSet::<PropType>::new();
+        absolute_properties.insert(PropType::POINTER);
+        let absolute_pointer = VirtualDeviceBuilder::new()?
+            .name("DeskLink Absolute Pointer")
+            .with_properties(&absolute_properties)?
+            .with_keys(&absolute_keys)?
             .with_absolute_axis(&absolute_x)?
             .with_absolute_axis(&absolute_y)?
             .build()?;
         Ok(Self {
             keyboard,
             mouse,
+            absolute_pointer,
             pressed: HashSet::new(),
             pressed_buttons: HashSet::new(),
         })
@@ -223,15 +245,13 @@ impl Injector {
         Ok(())
     }
 
-    fn position_cursor(&mut self, edge: ScreenEdge, ratio: f32) -> Result<()> {
-        let ratio_value = (ratio.clamp(0.0, 1.0) * 65_535.0) as i32;
-        let (x, y) = match edge {
-            ScreenEdge::Left => (1, ratio_value),
-            ScreenEdge::Right => (65_534, ratio_value),
-            ScreenEdge::Top => (ratio_value, 1),
-            ScreenEdge::Bottom => (ratio_value, 65_534),
-        };
-        self.mouse.emit(&[
+    fn position_cursor(&mut self, cursor: &RemoteCursor) -> Result<()> {
+        let x = (cursor.x as f32 / (cursor.width - 1).max(1) as f32 * 65_535.0).clamp(0.0, 65_535.0)
+            as i32;
+        let y = (cursor.y as f32 / (cursor.height - 1).max(1) as f32 * 65_535.0)
+            .clamp(0.0, 65_535.0) as i32;
+        self.absolute_pointer.emit(&[
+            EvdevEvent::new(EventType::KEY, Key::BTN_TOOL_MOUSE.code(), 1),
             EvdevEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, x),
             EvdevEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, y),
         ])?;
@@ -361,6 +381,8 @@ async fn main() -> Result<()> {
                     sequence = Some(current);
                     if let InputEvent::MouseMove { dx, dy } = event {
                         if let Some((edge, ratio)) = cursor.move_by(dx, dy) {
+                            cursor.snap_to_edge(edge);
+                            injector.position_cursor(&cursor)?;
                             remote = false;
                             injector.release_all()?;
                             socket
@@ -376,6 +398,8 @@ async fn main() -> Result<()> {
                             info!(?edge, ratio, "cursor returned to Windows edge");
                             continue;
                         }
+                        injector.position_cursor(&cursor)?;
+                        continue;
                     }
                     injector.emit(event)?;
                 }
@@ -388,7 +412,7 @@ async fn main() -> Result<()> {
                 height,
             } if authorized == Some((peer, session)) => {
                 cursor.enter(edge, ratio, width, height);
-                injector.position_cursor(edge, ratio)?;
+                injector.position_cursor(&cursor)?;
                 remote = true;
                 sequence = None;
                 last_seen = Instant::now();

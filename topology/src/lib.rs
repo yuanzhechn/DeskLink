@@ -152,4 +152,30 @@ mod tests {
         };
         assert_eq!(links_between(&windows, &linux)[0].overlap_start, 200);
     }
+
+    #[test]
+    fn aligned_midpoint_maps_to_remote_midpoint() {
+        let remote = ScreenRect {
+            id: "linux".into(),
+            x: 1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert!((coordinate_ratio(&remote, ScreenEdge::Left, 540) - 0.5).abs() < f32::EPSILON);
+        assert_eq!(ratio_coordinate(&remote, ScreenEdge::Left, 0.5), 540);
+    }
+
+    #[test]
+    fn offset_screens_preserve_global_crossing_coordinate() {
+        let remote = ScreenRect {
+            id: "linux".into(),
+            x: 1920,
+            y: 300,
+            width: 2560,
+            height: 1440,
+        };
+        let ratio = coordinate_ratio(&remote, ScreenEdge::Left, 540);
+        assert_eq!(ratio_coordinate(&remote, ScreenEdge::Left, ratio), 540);
+    }
 }

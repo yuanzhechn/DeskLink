@@ -1,5 +1,17 @@
 # DeskLink Changelog
 
+## 0.5.4
+
+- Drive the visible Linux pointer from the maintained logical cursor using absolute coordinates for every move.
+- Eliminate drift caused by Linux pointer acceleration on relative uinput events.
+- Snap the visible Linux pointer to the exact return edge before sending `EdgeReturn`.
+
+## 0.5.3
+
+- Move absolute positioning to a dedicated uinput pointer device with `INPUT_PROP_POINTER`.
+- Preserve the exact global crossing coordinate when mapping through partial or offset EdgeLinks.
+- Add topology tests for aligned midpoint and vertically offset screen mapping.
+
 ## 0.5.2
 
 - Log protocol version, effective config path and a non-secret token fingerprint on both endpoints.
