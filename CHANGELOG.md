@@ -1,5 +1,11 @@
 # DeskLink Changelog
 
+## 0.5.1
+
+- Bump the wire protocol version after the EdgeLink packet changes.
+- Return explicit protocol-version and shared-token rejection reasons.
+- Clean obsolete manual input-debug instructions from README.
+
 ## 0.5.0
 
 - Model every Windows monitor as an independent rectangle with signed coordinates.

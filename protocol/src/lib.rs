@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u8 = 1;
+pub const PROTOCOL_VERSION: u8 = 2;
 pub const DEFAULT_INPUT_PORT: u16 = 24801;
 pub const DEFAULT_CONTROL_PORT: u16 = 24800;
 
@@ -58,6 +58,10 @@ pub enum Packet {
     },
     Ack {
         session: u64,
+    },
+    Reject {
+        session: u64,
+        reason: String,
     },
 }
 

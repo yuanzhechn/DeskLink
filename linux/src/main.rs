@@ -256,6 +256,38 @@ async fn main() -> Result<()> {
         };
         match packet {
             Packet::Hello {
+                version, session, ..
+            } if version != PROTOCOL_VERSION => {
+                socket
+                    .send_to(
+                        &encode(&Packet::Reject {
+                            session,
+                            reason: format!(
+                                "protocol mismatch: host={version}, linux={PROTOCOL_VERSION}"
+                            ),
+                        })?,
+                        peer,
+                    )
+                    .await?;
+                warn!(?peer, version, "rejected incompatible Windows host");
+            }
+            Packet::Hello {
+                token: supplied,
+                session,
+                ..
+            } if supplied != token => {
+                socket
+                    .send_to(
+                        &encode(&Packet::Reject {
+                            session,
+                            reason: "shared token mismatch".to_owned(),
+                        })?,
+                        peer,
+                    )
+                    .await?;
+                warn!(?peer, "rejected Windows host with wrong token");
+            }
+            Packet::Hello {
                 version,
                 token: supplied,
                 session,

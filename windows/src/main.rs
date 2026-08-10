@@ -474,6 +474,12 @@ async fn main() -> Result<()> {
                             edge_candidate = None;
                             info!(?edge, ratio, "cursor returned to Windows");
                         }
+                        Packet::Reject { session, reason } if session == sender.session => {
+                            connected = false;
+                            set_remote_input(false);
+                            state = ControlState::Disconnected;
+                            warn!(%reason, "Linux client rejected the connection");
+                        }
                         _ => {}
                     }
                 }
