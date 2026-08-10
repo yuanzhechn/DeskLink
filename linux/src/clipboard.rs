@@ -97,22 +97,19 @@ async fn write_text(backend: ClipboardBackend, text: &str) -> Result<()> {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        // wl-copy and xclip can fork a long-lived clipboard owner. A piped
+        // stderr would remain open in that process and make wait_with_output
+        // block until the selection is replaced.
+        .stderr(Stdio::inherit())
         .spawn()
         .with_context(|| format!("start {} clipboard writer", backend.name()))?;
     let mut stdin = child.stdin.take().context("open clipboard writer stdin")?;
     stdin.write_all(text.as_bytes()).await?;
     stdin.shutdown().await?;
     drop(stdin);
-    let output = child.wait_with_output().await?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "{} clipboard write failed ({}): {}",
-            backend.name(),
-            output.status,
-            detail.trim()
-        );
+    let status = child.wait().await?;
+    if !status.success() {
+        bail!("{} clipboard write failed ({})", backend.name(), status);
     }
     Ok(())
 }
@@ -199,6 +196,7 @@ async fn handle_client(
                             continue;
                         }
                         write_message(&mut writer, &ControlMessage::ClipboardText { id: next_id, text }).await?;
+                        info!(id = next_id, "clipboard text sent to Windows");
                         next_id = next_id.wrapping_add(1);
                     }
                 }

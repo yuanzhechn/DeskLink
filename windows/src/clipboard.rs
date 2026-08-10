@@ -155,6 +155,25 @@ async fn connected_session(
         .saturating_add(MAX_CONTROL_HANDSHAKE_BYTES)
         .min(u32::MAX as usize);
     let mut next_id = 1u64;
+    if let Some(text) = last_text.as_ref() {
+        if text.len() <= max_bytes {
+            write_message(
+                &mut writer,
+                &ControlMessage::ClipboardText {
+                    id: next_id,
+                    text: text.clone(),
+                },
+            )
+            .await?;
+            info!(id = next_id, "initial clipboard text sent to Linux");
+            next_id = next_id.wrapping_add(1);
+        } else {
+            warn!(
+                bytes = text.len(),
+                max_bytes, "initial clipboard text is larger than configured limit; skipped"
+            );
+        }
+    }
     let mut poll = time::interval(Duration::from_millis(poll_ms.clamp(100, 10_000)));
     poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
     loop {
@@ -169,6 +188,7 @@ async fn connected_session(
                             continue;
                         }
                         write_message(&mut writer, &ControlMessage::ClipboardText { id: next_id, text }).await?;
+                        info!(id = next_id, "clipboard text sent to Linux");
                         next_id = next_id.wrapping_add(1);
                     }
                 }

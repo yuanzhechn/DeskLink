@@ -1,5 +1,11 @@
 # DeskLink Changelog
 
+## 0.6.2
+
+- Avoid waiting forever on stderr pipes inherited by the long-lived `xclip`/`wl-copy` clipboard owner.
+- Send the current Windows clipboard immediately when the clipboard channel connects.
+- Log clipboard sends on both endpoints for end-to-end diagnosis.
+
 ## 0.6.1
 
 - Keep the clipboard TCP channel connected when an operating-system clipboard operation fails.
