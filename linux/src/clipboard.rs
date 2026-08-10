@@ -11,6 +11,21 @@ use tokio::{
 };
 use tracing::{info, warn};
 
+#[derive(Debug, Clone, Copy)]
+enum ClipboardBackend {
+    Wayland,
+    X11,
+}
+
+impl ClipboardBackend {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Wayland => "wayland/wl-clipboard",
+            Self::X11 => "x11/xclip",
+        }
+    }
+}
+
 async fn write_message(
     writer: &mut (impl AsyncWrite + Unpin),
     message: &ControlMessage,
@@ -38,36 +53,66 @@ async fn read_message(
     Ok(decode_control(&data)?)
 }
 
-async fn read_text() -> Result<Option<String>> {
-    let output = Command::new("wl-paste")
-        .args(["--no-newline", "--type", "text"])
-        .output()
-        .await
-        .context("run wl-paste")?;
+async fn read_text(backend: ClipboardBackend) -> Result<Option<String>> {
+    let output = match backend {
+        ClipboardBackend::Wayland => Command::new("wl-paste")
+            .args(["--no-newline", "--type", "text"])
+            .output()
+            .await
+            .context("run wl-paste")?,
+        ClipboardBackend::X11 => Command::new("xclip")
+            .args(["-selection", "clipboard", "-out"])
+            .output()
+            .await
+            .context("run xclip")?,
+    };
     if !output.status.success() {
-        return Ok(None);
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if detail.is_empty()
+            || detail.contains("No selection")
+            || detail.contains("doesn't offer text")
+        {
+            return Ok(None);
+        }
+        bail!("{} clipboard read failed: {detail}", backend.name());
     }
     Ok(Some(
         String::from_utf8(output.stdout).context("clipboard is not UTF-8 text")?,
     ))
 }
 
-async fn write_text(text: &str) -> Result<()> {
-    let mut child = Command::new("wl-copy")
-        .arg("--type")
-        .arg("text/plain;charset=utf-8")
+async fn write_text(backend: ClipboardBackend, text: &str) -> Result<()> {
+    let mut command = match backend {
+        ClipboardBackend::Wayland => {
+            let mut command = Command::new("wl-copy");
+            command.arg("--type").arg("text/plain;charset=utf-8");
+            command
+        }
+        ClipboardBackend::X11 => {
+            let mut command = Command::new("xclip");
+            command.args(["-selection", "clipboard", "-in"]);
+            command
+        }
+    };
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .context("run wl-copy")?;
-    let mut stdin = child.stdin.take().context("open wl-copy stdin")?;
+        .with_context(|| format!("start {} clipboard writer", backend.name()))?;
+    let mut stdin = child.stdin.take().context("open clipboard writer stdin")?;
     stdin.write_all(text.as_bytes()).await?;
     stdin.shutdown().await?;
     drop(stdin);
-    let status = child.wait().await?;
-    if !status.success() {
-        bail!("wl-copy exited with {status}");
+    let output = child.wait_with_output().await?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{} clipboard write failed ({}): {}",
+            backend.name(),
+            output.status,
+            detail.trim()
+        );
     }
     Ok(())
 }
@@ -77,6 +122,7 @@ async fn handle_client(
     token: String,
     poll_ms: u64,
     max_bytes: usize,
+    backend: ClipboardBackend,
 ) -> Result<()> {
     let peer = stream.peer_addr()?;
     let (mut reader, mut writer) = stream.into_split();
@@ -109,8 +155,19 @@ async fn handle_client(
         _ => bail!("expected clipboard handshake"),
     }
 
-    info!(?peer, "clipboard channel connected");
-    let mut last_text = read_text().await.ok().flatten();
+    info!(
+        ?peer,
+        backend = backend.name(),
+        "clipboard channel connected"
+    );
+    let (mut last_text, mut last_read_error) = match read_text(backend).await {
+        Ok(text) => (text, None),
+        Err(error) => {
+            let detail = error.to_string();
+            warn!(%error, backend = backend.name(), "cannot read initial Linux clipboard; channel remains connected");
+            (None, Some(detail))
+        }
+    };
     let frame_limit = max_bytes
         .saturating_add(MAX_CONTROL_HANDSHAKE_BYTES)
         .min(u32::MAX as usize);
@@ -120,7 +177,20 @@ async fn handle_client(
     loop {
         tokio::select! {
             _ = poll.tick() => {
-                let Ok(current) = read_text().await else { continue };
+                let current = match read_text(backend).await {
+                    Ok(current) => {
+                        last_read_error = None;
+                        current
+                    }
+                    Err(error) => {
+                        let detail = error.to_string();
+                        if last_read_error.as_deref() != Some(detail.as_str()) {
+                            warn!(%error, backend = backend.name(), "cannot read Linux clipboard; channel remains connected");
+                            last_read_error = Some(detail);
+                        }
+                        continue;
+                    }
+                };
                 if current != last_text {
                     last_text = current.clone();
                     if let Some(text) = current {
@@ -139,9 +209,15 @@ async fn handle_client(
                         if text.len() > max_bytes {
                             warn!(bytes = text.len(), max_bytes, "remote clipboard text is larger than configured limit; skipped");
                         } else if last_text.as_deref() != Some(text.as_str()) {
-                            write_text(&text).await?;
-                            last_text = Some(text);
-                            info!("clipboard text received from Windows");
+                            match write_text(backend, &text).await {
+                                Ok(()) => {
+                                    last_text = Some(text);
+                                    info!(backend = backend.name(), "clipboard text received from Windows");
+                                }
+                                Err(error) => {
+                                    warn!(%error, backend = backend.name(), "cannot write Linux clipboard; channel remains connected");
+                                }
+                            }
                         }
                     }
                     ControlMessage::Reject { reason } => bail!("clipboard channel rejected: {reason}"),
@@ -153,25 +229,39 @@ async fn handle_client(
 }
 
 pub async fn run(bind: String, token: String, poll_ms: u64, max_bytes: usize) -> Result<()> {
-    Command::new("wl-paste")
+    let wayland_session = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let x11_session = std::env::var_os("DISPLAY").is_some();
+    let wl_available = Command::new("wl-paste")
         .arg("--version")
         .output()
         .await
-        .context("wl-paste is unavailable; install the wl-clipboard package")?;
-    Command::new("wl-copy")
-        .arg("--version")
-        .output()
-        .await
-        .context("wl-copy is unavailable; install the wl-clipboard package")?;
+        .is_ok()
+        && Command::new("wl-copy")
+            .arg("--version")
+            .output()
+            .await
+            .is_ok();
+    let xclip_available = Command::new("xclip").arg("-version").output().await.is_ok();
+    let backend = if wayland_session && wl_available {
+        ClipboardBackend::Wayland
+    } else if x11_session && xclip_available {
+        ClipboardBackend::X11
+    } else if wl_available {
+        ClipboardBackend::Wayland
+    } else if xclip_available {
+        ClipboardBackend::X11
+    } else {
+        bail!("no Linux clipboard backend found; install wl-clipboard (Wayland) or xclip (X11)");
+    };
     let listener = TcpListener::bind(&bind)
         .await
         .context("bind clipboard control port")?;
-    info!(%bind, max_bytes, "clipboard service listening");
+    info!(%bind, max_bytes, backend = backend.name(), "clipboard service listening");
     loop {
         let (stream, peer) = listener.accept().await?;
         let token = token.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_client(stream, token, poll_ms, max_bytes).await {
+            if let Err(error) = handle_client(stream, token, poll_ms, max_bytes, backend).await {
                 warn!(%error, ?peer, "clipboard client disconnected");
             }
         });

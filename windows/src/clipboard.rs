@@ -88,6 +88,18 @@ fn write_text(text: &str) -> Result<()> {
     Ok(())
 }
 
+async fn write_text_with_retry(text: &str) -> Result<()> {
+    let mut last_error = None;
+    for _ in 0..5 {
+        match write_text(text) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        time::sleep(Duration::from_millis(50)).await;
+    }
+    Err(last_error.expect("clipboard retry loop always runs"))
+}
+
 async fn write_message(
     writer: &mut (impl AsyncWrite + Unpin),
     message: &ControlMessage,
@@ -167,9 +179,15 @@ async fn connected_session(
                         if text.len() > max_bytes {
                             warn!(bytes = text.len(), max_bytes, "remote clipboard text is larger than configured limit; skipped");
                         } else if last_text.as_deref() != Some(text.as_str()) {
-                            write_text(&text)?;
-                            last_text = Some(text);
-                            info!("clipboard text received from Linux");
+                            match write_text_with_retry(&text).await {
+                                Ok(()) => {
+                                    last_text = Some(text);
+                                    info!("clipboard text received from Linux");
+                                }
+                                Err(error) => {
+                                    warn!(%error, "cannot write Windows clipboard; channel remains connected");
+                                }
+                            }
                         }
                     }
                     ControlMessage::Reject { reason } => bail!("clipboard channel rejected: {reason}"),

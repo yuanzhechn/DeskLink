@@ -2,7 +2,7 @@
 
 DeskLink 是一个面向局域网的 Windows → Linux 跨设备键盘、鼠标和剪贴板协同工具。它不传输桌面画面。
 
-当前版本：`0.6.0`。
+当前版本：`0.6.1`。
 
 ## 功能
 
@@ -55,7 +55,7 @@ cargo build -p desklink-linux --release
 首次运行前安装 Wayland 剪贴板工具，并配置 uinput 权限规则：
 
 ```bash
-sudo apt install wl-clipboard
+sudo apt install wl-clipboard xclip
 sudo usermod -aG input "$USER"
 sudo cp packaging/70-desklink-uinput.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
@@ -142,7 +142,7 @@ Linux 日志会显示：
 Windows host authorized
 ```
 
-剪贴板通道建立后，两端会显示 `clipboard channel connected`。复制纯文本后无需手工触发，通常会在 `poll_ms` 指定的时间内同步到另一端；文件、图片和富文本暂不同步。
+剪贴板通道建立后，两端会显示 `clipboard channel connected`。Linux 会根据当前图形会话自动选择 `wayland/wl-clipboard` 或 `x11/xclip` 后端。复制纯文本后无需手工触发，通常会在 `poll_ms` 指定的时间内同步到另一端；文件、图片和富文本暂不同步。
 
 ## 屏幕布局
 

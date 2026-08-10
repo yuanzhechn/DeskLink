@@ -1,5 +1,11 @@
 # DeskLink Changelog
 
+## 0.6.1
+
+- Keep the clipboard TCP channel connected when an operating-system clipboard operation fails.
+- Detect Wayland and X11 sessions and support both `wl-clipboard` and `xclip` backends.
+- Include backend error details in Linux logs and retry transient Windows clipboard locks.
+
 ## 0.6.0
 
 - Add bidirectional UTF-8 text clipboard synchronization over a separate reliable TCP channel.
