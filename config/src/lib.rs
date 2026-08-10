@@ -8,6 +8,7 @@ pub struct DeskLinkConfig {
     pub network: NetworkConfig,
     pub security: SecurityConfig,
     pub performance: PerformanceConfig,
+    pub topology: TopologyConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +16,7 @@ pub struct DeskLinkConfig {
 pub struct NetworkConfig {
     pub target: String,
     pub bind: String,
+    pub ui_bind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,12 +32,28 @@ pub struct PerformanceConfig {
     pub disconnect_timeout_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TopologyConfig {
+    pub enabled: bool,
+    pub edge: String,
+    pub remote_width: u32,
+    pub remote_height: u32,
+    pub remote_x: Option<i32>,
+    pub remote_y: Option<i32>,
+    pub enter_margin_px: i32,
+    pub edge_delay_ms: u64,
+    pub return_cooldown_ms: u64,
+    pub windows_layout_signature: Option<String>,
+}
+
 impl Default for DeskLinkConfig {
     fn default() -> Self {
         Self {
             network: NetworkConfig::default(),
             security: SecurityConfig::default(),
             performance: PerformanceConfig::default(),
+            topology: TopologyConfig::default(),
         }
     }
 }
@@ -45,6 +63,7 @@ impl Default for NetworkConfig {
         Self {
             target: "127.0.0.1:24801".to_owned(),
             bind: "0.0.0.0:24801".to_owned(),
+            ui_bind: "127.0.0.1:24802".to_owned(),
         }
     }
 }
@@ -66,6 +85,23 @@ impl Default for PerformanceConfig {
     }
 }
 
+impl Default for TopologyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            edge: "right".to_owned(),
+            remote_width: 1920,
+            remote_height: 1080,
+            remote_x: None,
+            remote_y: None,
+            enter_margin_px: 1,
+            edge_delay_ms: 80,
+            return_cooldown_ms: 500,
+            windows_layout_signature: None,
+        }
+    }
+}
+
 impl DeskLinkConfig {
     pub fn load_optional(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
@@ -76,6 +112,13 @@ impl DeskLinkConfig {
             .with_context(|| format!("failed to read config {}", path.display()))?;
         toml::from_str(&contents)
             .with_context(|| format!("failed to parse config {}", path.display()))
+    }
+
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let contents = toml::to_string_pretty(self).context("failed to serialize config")?;
+        fs::write(path, contents)
+            .with_context(|| format!("failed to save config {}", path.display()))
     }
 }
 

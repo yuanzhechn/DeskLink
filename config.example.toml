@@ -3,6 +3,7 @@
 target = "192.168.1.20:24801"
 # Linux Client listens on this address.
 bind = "0.0.0.0:24801"
+ui_bind = "127.0.0.1:24802"
 
 [security]
 # Set the same private token on both computers.
@@ -13,3 +14,16 @@ token = "replace-with-a-long-random-token"
 mouse_flush_ms = 2
 # Restore local control after this many milliseconds without an ACK.
 disconnect_timeout_ms = 6000
+
+[topology]
+# Place the Linux screen on this edge of the complete Windows virtual desktop.
+enabled = true
+edge = "right" # left, right, top or bottom
+remote_width = 1920
+remote_height = 1080
+# Set these through the localhost layout page, or enter logical desktop coordinates.
+# remote_x = 3840
+# remote_y = 0
+enter_margin_px = 1
+edge_delay_ms = 80
+return_cooldown_ms = 500

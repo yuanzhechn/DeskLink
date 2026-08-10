@@ -7,6 +7,7 @@ edition.workspace = true
 anyhow.workspace = true
 desklink-protocol = { path = "../protocol" }
 desklink-config = { path = "../config" }
+desklink-topology = { path = "../topology" }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -12,6 +12,14 @@ pub enum InputEvent {
     Key { code: u16, pressed: bool },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScreenEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Packet {
     Hello {
@@ -35,6 +43,18 @@ pub enum Packet {
     SetState {
         session: u64,
         remote: bool,
+    },
+    EnterRemote {
+        session: u64,
+        edge: ScreenEdge,
+        ratio: f32,
+        width: u32,
+        height: u32,
+    },
+    EdgeReturn {
+        session: u64,
+        edge: ScreenEdge,
+        ratio: f32,
     },
     Ack {
         session: u64,

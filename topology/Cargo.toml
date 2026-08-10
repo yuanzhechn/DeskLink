@@ -1,0 +1,8 @@
+[package]
+name = "desklink-topology"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+desklink-protocol = { path = "../protocol" }
+serde.workspace = true

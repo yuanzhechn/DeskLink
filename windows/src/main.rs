@@ -1,8 +1,13 @@
+mod layout;
+mod web_ui;
+
 use anyhow::{Context, Result};
 use desklink_config::DeskLinkConfig;
-use desklink_protocol::{decode, encode, InputEvent, Packet, PROTOCOL_VERSION};
+use desklink_protocol::{decode, encode, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION};
+use layout::LayoutSnapshot;
 use std::{
     net::SocketAddr,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicI32, Ordering},
         Arc, OnceLock,
@@ -12,13 +17,20 @@ use std::{
 use tokio::{
     io::{self, AsyncBufReadExt},
     net::UdpSocket,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        RwLock,
+    },
     time::{self, MissedTickBehavior},
 };
 use tracing::{info, warn};
+use web_ui::UiState;
 use windows_sys::Win32::{
     Foundation::{LPARAM, LRESULT, POINT, WPARAM},
-    UI::WindowsAndMessaging::*,
+    UI::{
+        HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2},
+        WindowsAndMessaging::*,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +263,24 @@ impl InputSender {
         Ok(())
     }
 
+    async fn enter_remote(
+        &self,
+        edge: ScreenEdge,
+        ratio: f32,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
+        let packet = Packet::EnterRemote {
+            session: self.session,
+            edge,
+            ratio: ratio.clamp(0.0, 1.0),
+            width,
+            height,
+        };
+        self.socket.send_to(&encode(&packet)?, self.target).await?;
+        Ok(())
+    }
+
     async fn hello(&self, token: &str) -> Result<()> {
         let packet = Packet::Hello {
             version: PROTOCOL_VERSION,
@@ -296,10 +326,16 @@ async fn flush_mouse(sender: &mut InputSender, dx: &mut i32, dy: &mut i32) -> Re
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
     tracing_subscriber::fmt().with_env_filter("info").init();
     let config_path =
         std::env::var("DESKLINK_CONFIG").unwrap_or_else(|_| "desklink.toml".to_owned());
-    let config = DeskLinkConfig::load_optional(&config_path)?;
+    let mut config = DeskLinkConfig::load_optional(&config_path)?;
+    let (initial_layout, windows_layout_changed) =
+        LayoutSnapshot::from_config(&mut config.topology);
+    config.save(&config_path)?;
     let target: SocketAddr = std::env::var("DESKLINK_TARGET")
         .unwrap_or_else(|_| config.network.target.clone())
         .parse()
@@ -307,6 +343,30 @@ async fn main() -> Result<()> {
     let token = std::env::var("DESKLINK_TOKEN").unwrap_or_else(|_| config.security.token.clone());
     let disconnect_timeout =
         Duration::from_millis(config.performance.disconnect_timeout_ms.max(1_000));
+    let topology_enabled = config.topology.enabled;
+    let enter_margin_px = config.topology.enter_margin_px;
+    let edge_delay = Duration::from_millis(config.topology.edge_delay_ms);
+    let return_cooldown = Duration::from_millis(config.topology.return_cooldown_ms);
+    let ui_bind: SocketAddr = config
+        .network
+        .ui_bind
+        .parse()
+        .context("invalid network.ui_bind")?;
+    let layout_state = Arc::new(RwLock::new(initial_layout));
+    let config_state = Arc::new(RwLock::new(config.clone()));
+    let ui_state = UiState {
+        layout: layout_state.clone(),
+        config: config_state.clone(),
+        config_path: PathBuf::from(&config_path),
+    };
+    tokio::spawn(async move {
+        if let Err(error) = web_ui::serve(ui_bind, ui_state).await {
+            warn!(%error, "localhost layout UI stopped");
+        }
+    });
+    if windows_layout_changed {
+        warn!("Windows monitor layout changed; Linux screen placement was reset");
+    }
     let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
     let mut sender = InputSender {
         socket: socket.clone(),
@@ -334,22 +394,41 @@ async fn main() -> Result<()> {
         }
     });
 
-    info!(?target, ?state, "DeskLink Windows Host started");
+    info!(?target, ?state, ui = %format!("http://{ui_bind}"), "DeskLink Windows Host started");
     let mut lines = io::BufReader::new(io::stdin()).lines();
+    let mut stdin_open = true;
     let mut heartbeat = time::interval(Duration::from_secs(2));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut move_flush = time::interval(Duration::from_millis(
         config.performance.mouse_flush_ms.clamp(1, 20),
     ));
     move_flush.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut edge_poll = time::interval(Duration::from_millis(10));
+    edge_poll.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut pending_dx = 0i32;
     let mut pending_dy = 0i32;
     let mut last_ack: Option<Instant> = Some(Instant::now());
     let mut reported_connected = false;
+    let mut connected = false;
+    let mut edge_candidate: Option<(ScreenEdge, Instant)> = None;
+    let mut last_edge_return = Instant::now()
+        .checked_sub(return_cooldown)
+        .unwrap_or_else(Instant::now);
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
+                let current_signature = layout::layout_signature(&layout::discover_windows_screens());
+                if current_signature != layout_state.read().await.signature {
+                    set_remote_input(false);
+                    state = ControlState::Local;
+                    let mut live_config = config_state.write().await;
+                    let (new_layout, _) = LayoutSnapshot::from_config(&mut live_config.topology);
+                    live_config.save(&config_path)?;
+                    *layout_state.write().await = new_layout;
+                    edge_candidate = None;
+                    warn!("Windows monitor layout changed; saved Linux placement was reset");
+                }
                 sender.hello(&token).await?;
                 let packet = Packet::Heartbeat { session: sender.session, timestamp_ms: now_ms() };
                 if let Err(error) = sender.socket.send_to(&encode(&packet)?, sender.target).await {
@@ -358,23 +437,76 @@ async fn main() -> Result<()> {
                 } else if state == ControlState::Remote {
                     sender.state(true).await?;
                 }
-                if state == ControlState::Remote
-                    && last_ack.map(|seen| seen.elapsed() > disconnect_timeout).unwrap_or(true)
-                {
-                    pending_dx = 0;
-                    pending_dy = 0;
-                    set_remote_input(false);
-                    state = ControlState::Disconnected;
+                if last_ack.map(|seen| seen.elapsed() > disconnect_timeout).unwrap_or(true) {
+                    if state == ControlState::Remote {
+                        pending_dx = 0;
+                        pending_dy = 0;
+                        set_remote_input(false);
+                        state = ControlState::Disconnected;
+                        warn!(timeout_ms = disconnect_timeout.as_millis(), "Linux client ACK timed out; local input restored");
+                    }
+                    connected = false;
                     reported_connected = false;
-                    warn!(timeout_ms = disconnect_timeout.as_millis(), "Linux client ACK timed out; local input restored");
                 }
             }
             Some((packet, peer)) = network_rx.recv() => {
-                if peer == sender.target && matches!(packet, Packet::Ack { session } if session == sender.session) {
-                    last_ack = Some(Instant::now());
-                    if !reported_connected {
-                        reported_connected = true;
-                        info!("Linux client acknowledged; connection ready");
+                if peer == sender.target {
+                    match packet {
+                        Packet::Ack { session } if session == sender.session => {
+                            last_ack = Some(Instant::now());
+                            connected = true;
+                            if !reported_connected {
+                                reported_connected = true;
+                                info!("Linux client acknowledged; connection ready");
+                            }
+                        }
+                        Packet::EdgeReturn { session, edge, ratio } if session == sender.session => {
+                            pending_dx = 0;
+                            pending_dy = 0;
+                            set_remote_input(false);
+                            sender.state(false).await?;
+                            sender.release_all().await?;
+                            if let Some((x, y)) = layout_state.read().await.return_point(edge, ratio) {
+                                unsafe { SetCursorPos(x, y); }
+                            }
+                            state = ControlState::Local;
+                            last_edge_return = Instant::now();
+                            edge_candidate = None;
+                            info!(?edge, ratio, "cursor returned to Windows");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ = edge_poll.tick(), if topology_enabled && state == ControlState::Local && connected => {
+                if last_edge_return.elapsed() >= return_cooldown {
+                    let mut point = POINT { x: 0, y: 0 };
+                    let entry = if unsafe { GetCursorPos(&mut point) } != 0 {
+                        layout_state.read().await.entry_at(point.x, point.y, enter_margin_px)
+                    } else { None };
+                    match entry {
+                        Some((remote_edge, ratio)) => {
+                            let since = match edge_candidate {
+                                Some((edge, since)) if edge == remote_edge => since,
+                                _ => {
+                                    let now = Instant::now();
+                                    edge_candidate = Some((remote_edge, now));
+                                    now
+                                }
+                            };
+                            if since.elapsed() >= edge_delay {
+                                pending_dx = 0;
+                                pending_dy = 0;
+                                let remote = layout_state.read().await.remote.clone();
+                                sender.enter_remote(remote_edge, ratio, remote.width, remote.height).await?;
+                                sender.state(true).await?;
+                                set_remote_input(true);
+                                state = ControlState::Remote;
+                                edge_candidate = None;
+                                info!(?remote_edge, ratio, "cursor crossed into Linux");
+                            }
+                        }
+                        None => edge_candidate = None,
                     }
                 }
             }
@@ -403,8 +535,8 @@ async fn main() -> Result<()> {
                     _ => {}
                 }
             }
-            line = lines.next_line() => {
-                let Some(line) = line? else { break };
+            line = lines.next_line(), if stdin_open => {
+                let Some(line) = line? else { stdin_open = false; continue };
                 let mut parts = line.split_whitespace();
                 match parts.next().unwrap_or("") {
                     "move" => {
@@ -427,6 +559,10 @@ async fn main() -> Result<()> {
                         pending_dy = 0;
                         last_ack = Some(Instant::now());
                         reported_connected = false;
+                        if let Some((edge, ratio)) = layout_state.read().await.default_entry() {
+                            let remote = layout_state.read().await.remote.clone();
+                            sender.enter_remote(edge, ratio, remote.width, remote.height).await?;
+                        }
                         sender.state(true).await?;
                         set_remote_input(true);
                         state = ControlState::Remote;

@@ -101,6 +101,20 @@ cp config.example.toml desklink.toml
 
 编辑 `desklink.toml`：Windows 主要使用 `network.target`，Linux 使用 `network.bind`。两端的 `security.token` 必须完全一致。环境变量 `DESKLINK_TARGET`、`DESKLINK_BIND`、`DESKLINK_TOKEN`、`DESKLINK_CONFIG` 会覆盖配置文件。
 
+## 屏幕拼图与自动穿越
+
+Windows Host 启动后，在 Windows 浏览器打开：
+
+```text
+http://127.0.0.1:24802
+```
+
+页面会显示每块 Windows 显示器的真实坐标、尺寸和相对位置。拖动绿色 Linux 屏幕到任意 Windows 屏幕旁边；距离边缘 80 像素以内时自动吸附。只有实际贴合并且有重叠区间的边缘才会生成 EdgeLink。
+
+布局保存到本地 `desklink.toml` 并立即生效。程序重启后继续使用；如果 Windows 显示器数量、分辨率或系统坐标发生变化，旧布局会自动失效并回到默认位置，随后可再次通过 localhost 页面调整。
+
+连接在线后不需要输入 `remote`：鼠标停留在有效 EdgeLink 边缘达到 `edge_delay_ms`（默认 80ms）后自动进入 Linux；从 Linux 对应边缘向外移动会自动返回正确的 Windows 显示器和对应高度。整个返回判断使用 DeskLink 自己维护的逻辑光标，不依赖 X11/Wayland 全局光标接口。
+
 ## 5. 防火墙
 
 Ubuntu：`sudo ufw allow 24801/udp`。Windows 弹出网络访问提示时，请允许 DeskLink 访问专用网络。

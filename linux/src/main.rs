@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use desklink_config::DeskLinkConfig;
-use desklink_protocol::{decode, encode, InputEvent, Packet, PROTOCOL_VERSION};
+use desklink_protocol::{decode, encode, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION};
 use evdev::{
     uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent as EvdevEvent, Key,
     RelativeAxisType,
@@ -15,6 +15,76 @@ struct Injector {
     mouse: evdev::uinput::VirtualDevice,
     pressed: HashSet<u16>,
     pressed_buttons: HashSet<u16>,
+}
+
+struct RemoteCursor {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    return_edge: Option<ScreenEdge>,
+}
+
+impl RemoteCursor {
+    fn new(width: u32, height: u32) -> Self {
+        Self {
+            x: width as i32 / 2,
+            y: height as i32 / 2,
+            width: width.max(1) as i32,
+            height: height.max(1) as i32,
+            return_edge: None,
+        }
+    }
+
+    fn enter(&mut self, edge: ScreenEdge, ratio: f32, width: u32, height: u32) {
+        self.width = width.max(1) as i32;
+        self.height = height.max(1) as i32;
+        let ratio = ratio.clamp(0.0, 1.0);
+        match edge {
+            ScreenEdge::Left => {
+                self.x = 1;
+                self.y = (self.height as f32 * ratio) as i32;
+            }
+            ScreenEdge::Right => {
+                self.x = self.width - 2;
+                self.y = (self.height as f32 * ratio) as i32;
+            }
+            ScreenEdge::Top => {
+                self.x = (self.width as f32 * ratio) as i32;
+                self.y = 1;
+            }
+            ScreenEdge::Bottom => {
+                self.x = (self.width as f32 * ratio) as i32;
+                self.y = self.height - 2;
+            }
+        }
+        self.x = self.x.clamp(0, self.width - 1);
+        self.y = self.y.clamp(0, self.height - 1);
+        self.return_edge = Some(edge);
+    }
+
+    fn move_by(&mut self, dx: i16, dy: i16) -> Option<(ScreenEdge, f32)> {
+        let next_x = self.x.saturating_add(dx as i32);
+        let next_y = self.y.saturating_add(dy as i32);
+        if let Some(edge) = self.return_edge {
+            let crossed = match edge {
+                ScreenEdge::Left => dx < 0 && next_x <= 0,
+                ScreenEdge::Right => dx > 0 && next_x >= self.width - 1,
+                ScreenEdge::Top => dy < 0 && next_y <= 0,
+                ScreenEdge::Bottom => dy > 0 && next_y >= self.height - 1,
+            };
+            if crossed {
+                let ratio = match edge {
+                    ScreenEdge::Left | ScreenEdge::Right => self.y as f32 / self.height as f32,
+                    ScreenEdge::Top | ScreenEdge::Bottom => self.x as f32 / self.width as f32,
+                };
+                return Some((edge, ratio.clamp(0.0, 1.0)));
+            }
+        }
+        self.x = next_x.clamp(0, self.width - 1);
+        self.y = next_y.clamp(0, self.height - 1);
+        None
+    }
 }
 impl Injector {
     fn new() -> Result<Self> {
@@ -154,6 +224,7 @@ async fn main() -> Result<()> {
     let socket = UdpSocket::bind(bind).await.context("bind input port")?;
     let mut injector =
         Injector::new().context("create /dev/uinput device (check udev permissions)")?;
+    let mut cursor = RemoteCursor::new(config.topology.remote_width, config.topology.remote_height);
     let mut buf = [0u8; 2048];
     let mut remote = false;
     let mut authorized: Option<(SocketAddr, u64)> = None;
@@ -221,8 +292,42 @@ async fn main() -> Result<()> {
                     .unwrap_or(true)
                 {
                     sequence = Some(current);
+                    if let InputEvent::MouseMove { dx, dy } = event {
+                        if let Some((edge, ratio)) = cursor.move_by(dx, dy) {
+                            remote = false;
+                            injector.release_all()?;
+                            socket
+                                .send_to(
+                                    &encode(&Packet::EdgeReturn {
+                                        session,
+                                        edge,
+                                        ratio,
+                                    })?,
+                                    peer,
+                                )
+                                .await?;
+                            info!(?edge, ratio, "cursor returned to Windows edge");
+                            continue;
+                        }
+                    }
                     injector.emit(event)?;
                 }
+            }
+            Packet::EnterRemote {
+                session,
+                edge,
+                ratio,
+                width,
+                height,
+            } if authorized == Some((peer, session)) => {
+                cursor.enter(edge, ratio, width, height);
+                remote = true;
+                sequence = None;
+                last_seen = Instant::now();
+                socket
+                    .send_to(&encode(&Packet::Ack { session })?, peer)
+                    .await?;
+                info!(?edge, ratio, "cursor entered Linux screen");
             }
             Packet::SetState {
                 session,

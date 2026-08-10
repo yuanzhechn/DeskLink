@@ -1,5 +1,15 @@
 # DeskLink Changelog
 
+## 0.5.0
+
+- Model every Windows monitor as an independent rectangle with signed coordinates.
+- Model Linux as a draggable logical screen and generate EdgeLink records only for actual overlapping borders.
+- Switch automatically from Windows to Linux after the configured edge delay.
+- Maintain Linux remote cursor state without querying Wayland and return through the matching edge.
+- Add a localhost-only layout editor at `http://127.0.0.1:24802`.
+- Snap the Linux screen to nearby Windows edges and persist placement in `desklink.toml`.
+- Detect Windows monitor-layout changes and invalidate stale placement automatically.
+
 ## 0.4.0
 
 - Split Linux uinput into dedicated virtual keyboard and virtual mouse devices.
@@ -24,4 +34,3 @@
 ## 0.1.0
 
 - Initial Windows-to-Linux UDP input prototype.
-
