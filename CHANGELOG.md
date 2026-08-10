@@ -1,5 +1,11 @@
 # DeskLink Changelog
 
+## 0.5.2
+
+- Log protocol version, effective config path and a non-secret token fingerprint on both endpoints.
+- Align the visible Linux pointer with the logical entry edge through uinput absolute axes.
+- Arm edge return only after moving at least 48 pixels into the Linux screen, preventing premature return.
+
 ## 0.5.1
 
 - Bump the wire protocol version after the EdgeLink packet changes.

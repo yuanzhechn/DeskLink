@@ -4,8 +4,8 @@ use desklink_protocol::{
     decode, encode, token_fingerprint, InputEvent, Packet, ScreenEdge, PROTOCOL_VERSION,
 };
 use evdev::{
-    uinput::VirtualDeviceBuilder, AttributeSet, EventType, InputEvent as EvdevEvent, Key,
-    RelativeAxisType,
+    uinput::VirtualDeviceBuilder, AbsInfo, AbsoluteAxisType, AttributeSet, EventType,
+    InputEvent as EvdevEvent, Key, RelativeAxisType, UinputAbsSetup,
 };
 use std::{collections::HashSet, net::SocketAddr, time::Instant};
 use tokio::net::UdpSocket;
@@ -25,6 +25,7 @@ struct RemoteCursor {
     width: i32,
     height: i32,
     return_edge: Option<ScreenEdge>,
+    return_armed: bool,
 }
 
 impl RemoteCursor {
@@ -35,6 +36,7 @@ impl RemoteCursor {
             width: width.max(1) as i32,
             height: height.max(1) as i32,
             return_edge: None,
+            return_armed: false,
         }
     }
 
@@ -63,19 +65,29 @@ impl RemoteCursor {
         self.x = self.x.clamp(0, self.width - 1);
         self.y = self.y.clamp(0, self.height - 1);
         self.return_edge = Some(edge);
+        self.return_armed = false;
     }
 
     fn move_by(&mut self, dx: i16, dy: i16) -> Option<(ScreenEdge, f32)> {
         let next_x = self.x.saturating_add(dx as i32);
         let next_y = self.y.saturating_add(dy as i32);
         if let Some(edge) = self.return_edge {
+            let inward_distance = match edge {
+                ScreenEdge::Left => next_x,
+                ScreenEdge::Right => self.width - 1 - next_x,
+                ScreenEdge::Top => next_y,
+                ScreenEdge::Bottom => self.height - 1 - next_y,
+            };
+            if inward_distance >= 48 {
+                self.return_armed = true;
+            }
             let crossed = match edge {
                 ScreenEdge::Left => dx < 0 && next_x <= 0,
                 ScreenEdge::Right => dx > 0 && next_x >= self.width - 1,
                 ScreenEdge::Top => dy < 0 && next_y <= 0,
                 ScreenEdge::Bottom => dy > 0 && next_y >= self.height - 1,
             };
-            if crossed {
+            if self.return_armed && crossed {
                 let ratio = match edge {
                     ScreenEdge::Left | ScreenEdge::Right => self.y as f32 / self.height as f32,
                     ScreenEdge::Top | ScreenEdge::Bottom => self.x as f32 / self.width as f32,
@@ -110,10 +122,15 @@ impl Injector {
         axes.insert(RelativeAxisType::REL_Y);
         axes.insert(RelativeAxisType::REL_WHEEL);
         axes.insert(RelativeAxisType::REL_HWHEEL);
+        let absolute_range = AbsInfo::new(0, 0, 65_535, 0, 0, 1);
+        let absolute_x = UinputAbsSetup::new(AbsoluteAxisType::ABS_X, absolute_range);
+        let absolute_y = UinputAbsSetup::new(AbsoluteAxisType::ABS_Y, absolute_range);
         let mouse = VirtualDeviceBuilder::new()?
             .name("DeskLink Virtual Mouse")
             .with_keys(&mouse_keys)?
             .with_relative_axes(&axes)?
+            .with_absolute_axis(&absolute_x)?
+            .with_absolute_axis(&absolute_y)?
             .build()?;
         Ok(Self {
             keyboard,
@@ -203,6 +220,21 @@ impl Injector {
             self.mouse
                 .emit(&[EvdevEvent::new(EventType::KEY, code, 0)])?;
         }
+        Ok(())
+    }
+
+    fn position_cursor(&mut self, edge: ScreenEdge, ratio: f32) -> Result<()> {
+        let ratio_value = (ratio.clamp(0.0, 1.0) * 65_535.0) as i32;
+        let (x, y) = match edge {
+            ScreenEdge::Left => (1, ratio_value),
+            ScreenEdge::Right => (65_534, ratio_value),
+            ScreenEdge::Top => (ratio_value, 1),
+            ScreenEdge::Bottom => (ratio_value, 65_534),
+        };
+        self.mouse.emit(&[
+            EvdevEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_X.0, x),
+            EvdevEvent::new(EventType::ABSOLUTE, AbsoluteAxisType::ABS_Y.0, y),
+        ])?;
         Ok(())
     }
 }
@@ -356,6 +388,7 @@ async fn main() -> Result<()> {
                 height,
             } if authorized == Some((peer, session)) => {
                 cursor.enter(edge, ratio, width, height);
+                injector.position_cursor(edge, ratio)?;
                 remote = true;
                 sequence = None;
                 last_seen = Instant::now();
