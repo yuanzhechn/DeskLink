@@ -274,6 +274,23 @@ async fn main() -> Result<()> {
         .parse()?;
     let token = std::env::var("DESKLINK_TOKEN").unwrap_or_else(|_| config.security.token.clone());
     let token_id = token_fingerprint(&token);
+    if config.clipboard.enabled {
+        let clipboard_bind = config.network.control_bind.clone();
+        let clipboard_token = token.clone();
+        let clipboard_config = config.clipboard.clone();
+        tokio::spawn(async move {
+            if let Err(error) = clipboard::run(
+                clipboard_bind,
+                clipboard_token,
+                clipboard_config.poll_ms,
+                clipboard_config.max_bytes,
+            )
+            .await
+            {
+                warn!(%error, "clipboard service stopped; input sharing remains available");
+            }
+        });
+    }
     let disconnect_timeout =
         Duration::from_millis(config.performance.disconnect_timeout_ms.max(1_000));
     let socket = UdpSocket::bind(bind).await.context("bind input port")?;
@@ -454,3 +471,4 @@ async fn main() -> Result<()> {
         }
     }
 }
+mod clipboard;

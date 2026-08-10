@@ -1,8 +1,8 @@
 # DeskLink
 
-DeskLink 是一个面向局域网的 Windows → Linux 跨设备键盘、鼠标协同工具。它不传输桌面画面，只传输输入事件。
+DeskLink 是一个面向局域网的 Windows → Linux 跨设备键盘、鼠标和剪贴板协同工具。它不传输桌面画面。
 
-当前版本：`0.5.4`。
+当前版本：`0.6.0`。
 
 ## 功能
 
@@ -15,6 +15,7 @@ DeskLink 是一个面向局域网的 Windows → Linux 跨设备键盘、鼠标�
 - Windows 和 Linux 可以任意顺序启动。
 - `Ctrl+Alt+Esc` 紧急恢复 Windows 本地输入。
 - localhost 页面拖动、保存 Linux 屏幕位置。
+- Windows 与 Linux 双向同步 UTF-8 纯文本剪贴板。
 
 ## 工程目录
 
@@ -51,9 +52,10 @@ cd ~/DeskLink
 cargo build -p desklink-linux --release
 ```
 
-首次运行前安装 uinput 权限规则：
+首次运行前安装 Wayland 剪贴板工具，并配置 uinput 权限规则：
 
 ```bash
+sudo apt install wl-clipboard
 sudo usermod -aG input "$USER"
 sudo cp packaging/70-desklink-uinput.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
@@ -84,6 +86,7 @@ Windows 的 `desklink.toml`：
 [network]
 target = "192.168.66.1:24801"
 ui_bind = "127.0.0.1:24802"
+control_port = 24800
 
 [security]
 token = "请替换为自己的随机令牌"
@@ -94,9 +97,19 @@ Linux 的 `desklink.toml`：
 ```toml
 [network]
 bind = "0.0.0.0:24801"
+control_bind = "0.0.0.0:24800"
 
 [security]
 token = "请替换为自己的随机令牌"
+```
+
+剪贴板默认配置如下。`max_bytes` 默认是 64 MiB；如果需要同步更大的文本，可在两端同时调大。设置 `enabled = false` 可关闭剪贴板同步。
+
+```toml
+[clipboard]
+enabled = true
+poll_ms = 400
+max_bytes = 67108864
 ```
 
 两端 `security.token` 必须完全一致。环境变量 `DESKLINK_TARGET`、`DESKLINK_BIND`、`DESKLINK_TOKEN` 和 `DESKLINK_CONFIG` 的优先级高于配置文件。
@@ -128,6 +141,8 @@ Linux 日志会显示：
 ```text
 Windows host authorized
 ```
+
+剪贴板通道建立后，两端会显示 `clipboard channel connected`。复制纯文本后无需手工触发，通常会在 `poll_ms` 指定的时间内同步到另一端；文件、图片和富文本暂不同步。
 
 ## 屏幕布局
 
@@ -161,6 +176,7 @@ Ubuntu/Linux：
 
 ```bash
 sudo ufw allow 24801/udp
+sudo ufw allow 24800/tcp
 ```
 
 Windows 出现网络访问提示时，允许 DeskLink 访问专用网络。
@@ -180,6 +196,7 @@ Windows 出现网络访问提示时，允许 DeskLink 访问专用网络。
 
 ```bash
 ss -lunp | grep 24801
+ss -ltnp | grep 24800
 pgrep -af desklink-linux
 ```
 

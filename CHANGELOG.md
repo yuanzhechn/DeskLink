@@ -1,5 +1,13 @@
 # DeskLink Changelog
 
+## 0.6.0
+
+- Add bidirectional UTF-8 text clipboard synchronization over a separate reliable TCP channel.
+- Authenticate the clipboard channel with the existing shared token and protocol version.
+- Use native Windows clipboard APIs and `wl-clipboard` on Wayland Linux.
+- Reconnect automatically regardless of endpoint startup order and suppress clipboard echo loops.
+- Make the clipboard polling interval and transfer size configurable, with a 64 MiB default.
+
 ## 0.5.4
 
 - Drive the visible Linux pointer from the maintained logical cursor using absolute coordinates for every move.

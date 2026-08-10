@@ -1,3 +1,4 @@
+mod clipboard;
 mod layout;
 mod web_ui;
 
@@ -344,6 +345,17 @@ async fn main() -> Result<()> {
         .context("invalid DESKLINK_TARGET")?;
     let token = std::env::var("DESKLINK_TOKEN").unwrap_or_else(|_| config.security.token.clone());
     let token_id = token_fingerprint(&token);
+    if config.clipboard.enabled {
+        let clipboard_target = SocketAddr::new(target.ip(), config.network.control_port);
+        let clipboard_token = token.clone();
+        let clipboard_config = config.clipboard.clone();
+        tokio::spawn(clipboard::run(
+            clipboard_target,
+            clipboard_token,
+            clipboard_config.poll_ms,
+            clipboard_config.max_bytes,
+        ));
+    }
     let disconnect_timeout =
         Duration::from_millis(config.performance.disconnect_timeout_ms.max(1_000));
     let topology_enabled = config.topology.enabled;

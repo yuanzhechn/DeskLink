@@ -9,6 +9,7 @@ pub struct DeskLinkConfig {
     pub security: SecurityConfig,
     pub performance: PerformanceConfig,
     pub topology: TopologyConfig,
+    pub clipboard: ClipboardConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,16 @@ pub struct NetworkConfig {
     pub target: String,
     pub bind: String,
     pub ui_bind: String,
+    pub control_bind: String,
+    pub control_port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClipboardConfig {
+    pub enabled: bool,
+    pub poll_ms: u64,
+    pub max_bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +65,7 @@ impl Default for DeskLinkConfig {
             security: SecurityConfig::default(),
             performance: PerformanceConfig::default(),
             topology: TopologyConfig::default(),
+            clipboard: ClipboardConfig::default(),
         }
     }
 }
@@ -64,6 +76,18 @@ impl Default for NetworkConfig {
             target: "127.0.0.1:24801".to_owned(),
             bind: "0.0.0.0:24801".to_owned(),
             ui_bind: "127.0.0.1:24802".to_owned(),
+            control_bind: "0.0.0.0:24800".to_owned(),
+            control_port: 24800,
+        }
+    }
+}
+
+impl Default for ClipboardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            poll_ms: 400,
+            max_bytes: 64 * 1024 * 1024,
         }
     }
 }

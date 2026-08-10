@@ -1,5 +1,5 @@
 # DeskLink Windows Host
 
-Windows Host 负责输入源、状态机和 LAN 发送。当前版本已接入 `WH_KEYBOARD_LL`/`WH_MOUSE_LL`：输入 `remote` 后会捕获真实键盘、鼠标移动、按键和滚轮事件；输入 `local` 或 `release` 后停止捕获并恢复本地输入。终端命令仍可用于链路调试。
+Windows Host 负责输入源、屏幕布局、状态机和 LAN 发送。当前版本通过 `WH_KEYBOARD_LL`/`WH_MOUSE_LL` 捕获输入，并在光标穿过有效 EdgeLink 时自动把控制切换到 Linux。
 
-环境变量：`DESKLINK_TARGET=Ubuntu_IP:24801`。
+高频输入使用 UDP 24801；双向纯文本剪贴板使用 TCP 24800，并通过 Windows 原生剪贴板 API 读写。详细配置、编译与启动方法见项目根目录 `README.md`。

@@ -4,6 +4,9 @@ target = "192.168.1.20:24801"
 # Linux Client listens on this address.
 bind = "0.0.0.0:24801"
 ui_bind = "127.0.0.1:24802"
+# Reliable clipboard channel. Linux listens here; Windows uses target IP + control_port.
+control_bind = "0.0.0.0:24800"
+control_port = 24800
 
 [security]
 # Set the same private token on both computers.
@@ -14,6 +17,12 @@ token = "replace-with-a-long-random-token"
 mouse_flush_ms = 2
 # Restore local control after this many milliseconds without an ACK.
 disconnect_timeout_ms = 6000
+
+[clipboard]
+enabled = true
+poll_ms = 400
+# Default 64 MiB. Increase this on both machines when larger text is needed.
+max_bytes = 67108864
 
 [topology]
 # Place the Linux screen on this edge of the complete Windows virtual desktop.

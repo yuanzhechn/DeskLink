@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u8 = 2;
 pub const DEFAULT_INPUT_PORT: u16 = 24801;
 pub const DEFAULT_CONTROL_PORT: u16 = 24800;
+pub const MAX_CONTROL_HANDSHAKE_BYTES: usize = 64 * 1024;
 
 pub fn token_fingerprint(token: &str) -> String {
     let hash = token
@@ -75,6 +76,31 @@ pub enum Packet {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ControlMessage {
+    Hello {
+        version: u8,
+        device_id: String,
+        token: String,
+    },
+    Ready,
+    Reject {
+        reason: String,
+    },
+    ClipboardText {
+        id: u64,
+        text: String,
+    },
+}
+
+pub fn encode_control(message: &ControlMessage) -> Result<Vec<u8>, bincode::Error> {
+    bincode::serialize(message)
+}
+
+pub fn decode_control(bytes: &[u8]) -> Result<ControlMessage, bincode::Error> {
+    bincode::deserialize(bytes)
+}
+
 pub fn encode(packet: &Packet) -> Result<Vec<u8>, bincode::Error> {
     bincode::serialize(packet)
 }
@@ -126,5 +152,17 @@ mod tests {
             token_fingerprint("desklink-local"),
             token_fingerprint("different")
         );
+    }
+
+    #[test]
+    fn clipboard_message_round_trips() {
+        let message = ControlMessage::ClipboardText {
+            id: 7,
+            text: "DeskLink 剪贴板".to_owned(),
+        };
+        assert!(matches!(
+            decode_control(&encode_control(&message).unwrap()).unwrap(),
+            ControlMessage::ClipboardText { id: 7, text } if text == "DeskLink 剪贴板"
+        ));
     }
 }
